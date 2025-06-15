@@ -9,7 +9,10 @@ export function activate(context: vscode.ExtensionContext) {
 
   chatSidebarProvider = new ChatSidebarProvider(context.extensionUri, context);
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider("heliaChatView", chatSidebarProvider)
+    vscode.window.registerWebviewViewProvider(
+      "heliaChatView",
+      chatSidebarProvider
+    )
   );
 
   // Register the quick ask command if needed
@@ -93,14 +96,16 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand("heliaChat.showHistory", async () => {
       const chatProvider = getChatProvider();
-      const items = chatProvider.chats.map((chat: { id: string; name: string }) => ({
-        label: chat.name,
-        id: chat.id,
-      }));
+      const items = chatProvider.chats.map(
+        (chat: { id: string; name: string }) => ({
+          label: chat.name,
+          id: chat.id,
+        })
+      );
 
-      const selected = await vscode.window.showQuickPick(items, {
+      const selected = (await vscode.window.showQuickPick(items, {
         placeHolder: "Select a chat",
-      }) as { label: string; id: string } | undefined;
+      })) as { label: string; id: string } | undefined;
 
       if (selected) {
         chatProvider.activeChatId = selected.id;
@@ -111,7 +116,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 }
 
-export function deactivate() {}
+export function deactivate() { }
 
 class ChatSidebarProvider implements vscode.WebviewViewProvider {
   // Change protected properties to public for external access
@@ -154,15 +159,30 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
     return Math.random().toString(36).substr(2, 9);
   }
 
-  // Update the HTML to match the provided UI design while preserving functionality
+  // Helper function to render Markdown safely for server-side rendering (fallback for preview)
+  private renderMarkdown(rawMarkdown: string): string {
+    // Simple fallback: escape HTML special chars and replace code blocks
+    // For production, use a proper Markdown parser and sanitizer
+    return rawMarkdown
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\n/g, "<br>");
+  }
+
+  // Update the HTML to render code blocks properly with Markdown, sanitization, and syntax highlighting
   private getHtml(): string {
     const activeChat = this.chats.find((c) => c.id === this.activeChatId);
     const chatHistory = (activeChat?.history || [])
-        .map(
-            (msg) =>
-                `<div class="message ${msg.role === "user" ? "user" : "bot"}">${msg.content}</div>`
-        )
-        .join("");
+      .map(
+        (msg) =>
+          `<div class="message ${msg.role === "user" ? "user" : "assistant"}">${msg.role === "assistant"
+            ? this.renderMarkdown(msg.content)
+            : msg.content
+          }</div>`
+      )
+      .join("");
 
     return `<!DOCTYPE html>
     <html lang="en">
@@ -170,6 +190,7 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Chatbot Interface</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
     <style>
       * {
       margin: 0;
@@ -395,16 +416,63 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       color: #cccccc;
       margin-bottom: 8px;
       }
+
+      .copy-button {
+        display: none;
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: none;
+        border: none;
+        color: #cccccc;
+        cursor: pointer;
+        font-size: 14px;
+        z-index: 10;
+        padding: 4px;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
+      }
+
+      .copy-button:hover {
+        background-color: #3e3e42;
+      }
+
+      /* Tooltip text */
+      .copy-button .tooltip-text {
+        visibility: hidden;
+        width: 60px;
+        background-color: #444;
+        color: #fff;
+        text-align: center;
+        border-radius: 4px;
+        padding: 4px;
+        position: absolute;
+        top: -32px;
+        right: 0;
+        font-size: 11px;
+        opacity: 0;
+        transition: opacity 0.3s;
+      }
+
+      /* Show tooltip on hover */
+      .copy-button:hover .tooltip-text {
+        visibility: visible;
+        opacity: 1;
+      }
+
     </style>
     </head>
     <body>
     <div class="chat-container">
 
       <div class="chat-messages" id="chatMessages">
-      ${chatHistory || `<div class="welcome-message">
+      ${chatHistory ||
+      `<div class="welcome-message">
       <h2>AI Assistant</h2>
       <p>Start a conversation by typing your message below</p>
-      </div>`}
+      </div>`
+      }
       </div>
 
       <div class="typing-indicator" id="typingIndicator">
@@ -436,8 +504,53 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+
     <script>
       const vscode = acquireVsCodeApi();
+
+      function renderMarkdown(rawMarkdown) {
+        const html = DOMPurify.sanitize(marked.parse(rawMarkdown));
+        const container = document.createElement("div");
+        container.innerHTML = html;
+
+        container.querySelectorAll("pre").forEach((pre) => {
+          // Create copy button with icon and tooltip
+          const button = document.createElement("button");
+          button.className = "copy-button";
+          button.innerHTML = '<span class="tooltip-text">Copy</span>📋';
+
+          button.addEventListener("click", () => {
+            const code = pre.querySelector("code");
+            if (!code) return;
+
+            const text = code.innerText;
+
+            // Use clipboard API
+            navigator.clipboard.writeText(text).then(() => {
+              const tooltip = button.querySelector(".tooltip-text");
+              tooltip.textContent = "Copied!";
+              setTimeout(() => {
+                tooltip.textContent = "Copy";
+              }, 1500);
+            }).catch((err) => {
+              console.error("Copy failed:", err);
+            });
+          });
+
+          pre.style.position = "relative";
+          pre.appendChild(button);
+        });
+
+        container.querySelectorAll("pre code").forEach((block) => {
+          hljs.highlightElement(block);
+        });
+
+        return container.innerHTML;
+      }
+
 
       document.getElementById("sendButton").addEventListener("click", send);
 
@@ -479,10 +592,10 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
           streamingBubble.className = "message bot";
           chatDiv.appendChild(streamingBubble);
         }
-        streamingBubble.textContent = message.text;
+        streamingBubble.innerHTML = renderMarkdown(message.text);
         } else {
         if (streamingBubble) {
-          streamingBubble.textContent = message.text;
+          streamingBubble.innerHTML = renderMarkdown(message.text);
           streamingBubble = null; // Finalize the streaming bubble
         }
         }
@@ -579,18 +692,25 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
         chat.history.push({ role: "user", content: message.text });
         let fullReply = "";
-        await streamOllamaWithHistory(chat.history, selectedModel, (token: string, isDone: boolean) => {
-          if (token) {
-            fullReply += token;
+        await streamOllamaWithHistory(
+          chat.history,
+          selectedModel,
+          (token: string, isDone: boolean) => {
+            if (token) {
+              fullReply += token;
+            }
+            if (this.activeChatId === chat.id) {
+              webviewView.webview.postMessage({
+                text: fullReply,
+                stream: !isDone,
+              });
+            }
+            if (isDone && fullReply.trim()) {
+              chat.history.push({ role: "assistant", content: fullReply });
+              this.saveChats();
+            }
           }
-          if (this.activeChatId === chat.id) {
-            webviewView.webview.postMessage({ text: fullReply, stream: !isDone });
-          }
-          if (isDone && fullReply.trim()) {
-            chat.history.push({ role: "assistant", content: fullReply });
-            this.saveChats();
-          }
-        });
+        );
       }
     });
   }
@@ -609,8 +729,13 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
         this.saveChats();
       }
       this._webviewView.title = activeChat ? `${activeChat.name}` : "";
-      this._webviewView.webview.html = '';
+      this._webviewView.webview.html = "";
       this._webviewView.webview.html = this.getHtml();
+
+      // Re-send models to the webview after updating it
+      fetchOllamaModels().then((models) => {
+        this._webviewView?.webview.postMessage({ command: "models", models });
+      });
     }
   }
 }
@@ -633,7 +758,9 @@ async function fetchOllamaModels(): Promise<string[]> {
         res.on("end", () => {
           try {
             const json = JSON.parse(data);
-            const models = (json.models || []).map((m: any) => m.name || m.model);
+            const models = (json.models || []).map(
+              (m: any) => m.name || m.model
+            );
             resolve(models);
           } catch {
             resolve([]);
@@ -650,7 +777,7 @@ export function getChatProvider(): ChatSidebarProvider {
   return chatSidebarProvider;
 }
 
-// Fix the `streamOllamaWithHistory` function to accept the model parameter
+// Update the `streamOllamaWithHistory` function to ensure responses are sent as plain Markdown
 function streamOllamaWithHistory(
   history: { role: string; content: string }[],
   model: string,
@@ -686,14 +813,14 @@ function streamOllamaWithHistory(
           try {
             const json = JSON.parse(line);
             if (json.response) {
-              onToken(json.response, false);
+              onToken(json.response, false); // Send plain Markdown response
             }
             if (json.done && !finalMessageSent) {
               onToken(json.response || "", true);
               finalMessageSent = true;
               break;
             }
-          } catch {}
+          } catch { }
         }
       });
       res.on("end", () => {
