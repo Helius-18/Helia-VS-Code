@@ -232,7 +232,7 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       gap: 16px;
       min-height: 0;
       scrollbar-width: thin;
-      scrollbar-color: #44444400 #00000000;
+      scrollbar-color:rgb(78, 78, 78);
       }
 
       .chat-messages::-webkit-scrollbar {
@@ -275,7 +275,7 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       }
 
       .model-dropdown {
-      background-color: #1e1e1e;
+      background-color: #2d2d30; /* Dark background */
       border: 1px solid #3e3e42;
       border-radius: 4px;
       padding: 6px 10px;
@@ -289,9 +289,10 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       }
 
       .model-dropdown:focus {
-      border-color: #3e3e42 !important;
-      box-shadow: none !important;
-      outline: none !important;
+        background-color: #2d2d30; /* Ensure focus state matches */
+        border-color: #3e3e42 !important;
+        box-shadow: none !important;
+        outline: none !important;
       }
 
       .message-input {
@@ -418,7 +419,6 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       }
 
       .copy-button {
-        display: none;
         position: absolute;
         top: 8px;
         right: 8px;
