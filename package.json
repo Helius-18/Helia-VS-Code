@@ -27,7 +27,7 @@
       "heliaSidebar": [
         {
           "id": "heliaChatView",
-          "name": "Chat",
+          "name": "helia",
           "type": "webview",
           "icon": "media/icon.svg"
         }
@@ -41,8 +41,42 @@
       {
         "command": "heliaChat.askQuestion",
         "title": "Ask Helia a Quick Question"
+      },
+      {
+        "command": "heliaChat.newChat",
+        "title": "New Chat",
+        "icon": "$(add)"
+      },
+      {
+        "command": "heliaChat.showHistory",
+        "title": "Show History",
+        "icon": "$(history)"
+      },
+      {
+        "command": "heliaChat.deleteChat",
+        "title": "Delete Chat",
+        "icon": "$(trash)"
       }
-    ]
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "heliaChat.newChat",
+          "when": "view == heliaChatView",
+          "group": "navigation"
+        },
+        {
+          "command": "heliaChat.deleteChat",
+          "when": "view == heliaChatView",
+          "group": "navigation"
+        },
+        {
+          "command": "heliaChat.showHistory",
+          "when": "view == heliaChatView",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "compile": "node esbuild.js"

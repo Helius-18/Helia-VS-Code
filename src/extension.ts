@@ -2,13 +2,14 @@ import * as vscode from "vscode";
 import * as http from "http";
 import * as https from "https";
 
+let chatSidebarProvider: ChatSidebarProvider;
+
 export function activate(context: vscode.ExtensionContext) {
   vscode.window.showInformationMessage("Helia Chat Sidebar Activated!");
+
+  chatSidebarProvider = new ChatSidebarProvider(context.extensionUri, context);
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      "heliaChatView",
-      new ChatSidebarProvider(context.extensionUri)
-    )
+    vscode.window.registerWebviewViewProvider("heliaChatView", chatSidebarProvider)
   );
 
   // Register the quick ask command if needed
@@ -42,17 +43,84 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
   context.subscriptions.push(quickAskCommand);
+
+  // Ensure the webview updates correctly when adding or deleting chats
+  context.subscriptions.push(
+    vscode.commands.registerCommand("heliaChat.newChat", async () => {
+      const chatProvider = getChatProvider();
+      const id = chatProvider.generateId();
+      chatProvider.chats.push({
+        id,
+        name: `Chat ${chatProvider.chats.length + 1}`,
+        history: [],
+      });
+      chatProvider.activeChatId = id;
+      chatProvider.saveChats();
+      chatProvider.updateWebview(); // Ensure the webview reflects the new chat
+    })
+  );
+
+  // Update the delete chat command to not auto-create a new chat when all chats are deleted
+  context.subscriptions.push(
+    vscode.commands.registerCommand("heliaChat.deleteChat", async () => {
+      const chatProvider = getChatProvider();
+
+      // Find the active chat
+      const activeChatIndex = chatProvider.chats.findIndex(
+        (chat) => chat.id === chatProvider.activeChatId
+      );
+
+      if (activeChatIndex !== -1) {
+        // Remove the active chat and its history
+        chatProvider.chats.splice(activeChatIndex, 1);
+
+        // If no chats remain, clear the activeChatId
+        if (chatProvider.chats.length === 0) {
+          chatProvider.activeChatId = "";
+        } else {
+          // Otherwise, set the active chat to the first one
+          chatProvider.activeChatId = chatProvider.chats[0].id;
+        }
+
+        chatProvider.saveChats();
+        chatProvider.updateWebview(); // Update the webview to reflect the deleted chat
+      }
+    })
+  );
+
+  // Ensure the webview updates correctly when switching chats
+  context.subscriptions.push(
+    vscode.commands.registerCommand("heliaChat.showHistory", async () => {
+      const chatProvider = getChatProvider();
+      const items = chatProvider.chats.map((chat: { id: string; name: string }) => ({
+        label: chat.name,
+        id: chat.id,
+      }));
+
+      const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: "Select a chat",
+      }) as { label: string; id: string } | undefined;
+
+      if (selected) {
+        chatProvider.activeChatId = selected.id;
+        chatProvider.saveChats();
+        chatProvider.updateWebview(); // Ensure the webview reflects the active chat
+      }
+    })
+  );
 }
 
 export function deactivate() {}
 
 class ChatSidebarProvider implements vscode.WebviewViewProvider {
-  private chats: {
+  // Change protected properties to public for external access
+  public chats: {
     id: string;
     name: string;
     history: { role: string; content: string }[];
   }[] = [];
-  private activeChatId: string = "";
+  public activeChatId: string = "";
+
   constructor(
     private readonly _extensionUri: vscode.Uri,
     private readonly _context?: vscode.ExtensionContext
@@ -71,7 +139,8 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private saveChats() {
+  // Change private methods to public for external access
+  public saveChats() {
     if (this._context) {
       this._context.globalState.update("heliaChats", {
         chats: this.chats,
@@ -80,245 +149,320 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private generateId() {
+  public generateId() {
     return Math.random().toString(36).substr(2, 9);
   }
 
+  // Update the HTML to match the provided UI design while preserving functionality
   private getHtml(): string {
     const activeChat = this.chats.find((c) => c.id === this.activeChatId);
     const chatHistory = (activeChat?.history || [])
-      .map(
-        (msg) =>
-          `<div class="bubble ${msg.role === "user" ? "user" : "bot"}">${msg.content}</div>`
-      )
-      .join("");
+        .map(
+            (msg) =>
+                `<div class="message ${msg.role === "user" ? "user" : "bot"}">${msg.content}</div>`
+        )
+        .join("");
 
-    return `
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-                html, body {
-                    padding: 0;
-                    margin: 0;
-                    height: 100%;
-                    background: var(--vscode-sideBar-background);
-                    color: var(--vscode-editor-foreground);
-                    font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
-                    display: flex;
-                    flex-direction: column;
-                }
+    return `<!DOCTYPE html>
+    <html lang="en">
+    <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chatbot Interface</title>
+    <style>
+      * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      }
 
-                .top-bar {
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    padding: 0 8px;
-                    height: 44px;
-                    background: var(--vscode-sideBar-background);
-                    border-bottom: 1px solid var(--vscode-editorWidget-border);
-                }
+      body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      color: #cccccc;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      }
 
-                .top-bar-title {
-                    font-size: 1em;
-                    font-weight: bold;
-                    color: var(--vscode-editor-foreground);
-                }
+      .chat-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      max-width: 800px;
+      margin: 0 auto;
+      width: 100%;
+      }
 
-                .top-bar-buttons {
-                    display: flex;
-                    gap: 8px;
-                }
+      .input-container {
+      background-color: #2d2d30;
+      border: 1px solid #3e3e42;
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 20px;
+      margin-top: 0;
+      }
 
-                .icon-btn {
-                    width: 32px;
-                    height: 32px;
-                    font-size: 20px;
-                    background: none;
-                    border: none;
-                    color: var(--vscode-button-background);
-                    border-radius: 50%;
-                    cursor: pointer;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                }
+      .input-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      justify-content: space-between;
+      }
 
-                .icon-btn:hover {
-                    background: var(--vscode-editorWidget-background);
-                }
+      .model-dropdown {
+      background-color: #1e1e1e;
+      border: 1px solid #3e3e42;
+      border-radius: 4px;
+      padding: 6px 10px;
+      color: #cccccc;
+      font-size: 12px;
+      cursor: pointer;
+      appearance: none;
+      outline: none;
+      max-width: min-content;
+      }
 
-                #chat {
-                    flex: 1;
-                    overflow-y: auto;
-                    padding: 16px;
-                    display: flex;
-                    flex-direction: column;
-                    gap: 8px;
-                }
+      .model-dropdown:focus {
+      border-color: #3e3e42 !important;
+      box-shadow: none !important;
+      outline: none !important;
+      }
 
-                .bubble {
-                    padding: 10px 14px;
-                    border-radius: 12px;
-                    max-width: 80%;
-                    word-wrap: break-word;
-                    font-size: 0.95em;
-                }
+      .message-input {
+      width: 100%;
+      background: transparent;
+      border: none;
+      color: #cccccc;
+      font-size: 14px;
+      outline: none;
+      resize: none;
+      min-height: 20px;
+      max-height: 120px;
+      font-family: inherit;
+      }
 
-                .user {
-                    align-self: flex-end;
-                    background: var(--vscode-button-background);
-                    color: var(--vscode-button-foreground);
-                    border-bottom-right-radius: 2px;
-                }
+      .message-input:focus {
+      outline: none !important;
+      border: none !important;
+      box-shadow: none !important;
+      }
+      .message-input::placeholder {
+      color: #6a6a6a;
+      }
 
-                .bot {
-                    align-self: flex-start;
-                    background: var(--vscode-editorWidget-background);
-                    color: var(--vscode-editorWidget-foreground);
-                    border-bottom-left-radius: 2px;
-                }
+      .input-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+      }
 
-                .input-container {
-                    border-top: 1px solid var(--vscode-editorWidget-border);
-                    background: var(--vscode-sideBar-background);
-                    padding: 12px 14px;
-                    display: flex;
-                    align-items: flex-end;
-                    gap: 8px;
-                }
+      .icon-button {
+      background: none;
+      border: none;
+      color: #cccccc;
+      cursor: pointer;
+      padding: 6px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.2s;
+      }
 
-                #input {
-                    flex: 1;
-                    resize: vertical;
-                    min-height: 36px;
-                    max-height: 120px;
-                    padding: 8px 10px;
-                    border-radius: 6px;
-                    border: 1px solid var(--vscode-input-border);
-                    background: var(--vscode-input-background);
-                    color: var(--vscode-input-foreground);
-                    font-size: 0.95em;
-                    outline: none;
-                }
+      .icon-button:hover {
+      background-color: #3e3e42;
+      }
 
-                #input:focus {
-                    border: 1.5px solid var(--vscode-focusBorder);
-                }
+      .icon-button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      }
 
-                #sendBtn {
-                    min-width: 40px;
-                    height: 36px;
-                    border-radius: 6px;
-                    border: none;
-                    background: var(--vscode-button-background);
-                    color: var(--vscode-button-foreground);
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    cursor: pointer;
-                    transition: background 0.2s ease;
-                }
+      .send-button {
+      background-color: #0078d4;
+      color: white;
+      }
 
-                #sendBtn:hover {
-                    background: var(--vscode-button-hoverBackground);
-                }
+      .send-button:hover:not(:disabled) {
+      background-color: #106ebe;
+      }
 
-                #sendBtn svg {
-                    width: 20px;
-                    height: 20px;
-                }
-            </style>
-        </head>
-        <body>
-            <div class="top-bar">
-                <div class="top-bar-title">Helia : ${activeChat?.name || "Chat"}</div>
-                <div class="top-bar-buttons">
-                    <button class="icon-btn" id="newChatBtn" title="New Chat">＋</button>
-                    <button class="icon-btn" id="chatHistoryBtn" title="Chat History">⏳</button>
-                </div>
-            </div>
+      .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      }
 
-            <div id="chat">${chatHistory}</div>
+      .message {
+      padding: 12px 16px;
+      border-radius: 8px;
+      max-width: 80%;
+      word-wrap: break-word;
+      }
 
-            <div class="input-container">
-                <textarea id="input" rows="1" placeholder="Ask something..."></textarea>
-                <button id="sendBtn" title="Send">
-                    <svg viewBox="0 0 20 20" fill="currentColor">
-                        <path d="M2.94 2.94a1.5 1.5 0 0 1 1.6-.33l12.5 5.1a1.5 1.5 0 0 1 0 2.78l-12.5 5.1a1.5 1.5 0 0 1-2.06-1.6l.7-3.5a.5.5 0 0 1 .49-.4h7.13a.5.5 0 0 0 0-1H3.17a.5.5 0 0 1-.49-.4l-.7-3.5a1.5 1.5 0 0 1 .96-1.65z" />
-                    </svg>
-                </button>
-            </div>
+      .message.user {
+      background-color: #0078d4;
+      color: white;
+      align-self: flex-end;
+      }
 
-            <script>
-                const vscode = acquireVsCodeApi();
+      .message.bot {
+      background-color: #2d2d30;
+      border: 1px solid #3e3e42;
+      align-self: flex-start;
+      }
 
-                document.getElementById("chatHistoryBtn").addEventListener("click", () => {
-                    vscode.postMessage({ command: "showChatPicker" });
-                });
+      .typing-indicator {
+      display: none;
+      padding: 12px 16px;
+      background-color: #2d2d30;
+      border: 1px solid #3e3e42;
+      border-radius: 8px;
+      max-width: 80%;
+      align-self: flex-start;
+      }
 
-                document.getElementById("newChatBtn").addEventListener("click", () => {
-                    vscode.postMessage({ command: "newChat" });
-                });
+      .typing-dots {
+      display: flex;
+      gap: 4px;
+      }
 
-                document.getElementById("sendBtn").addEventListener("click", send);
+      .typing-dots span {
+      width: 6px;
+      height: 6px;
+      background-color: #cccccc;
+      border-radius: 50%;
+      animation: typing 1.4s infinite ease-in-out;
+      }
 
-                document.getElementById("input").addEventListener("keydown", (e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        send();
-                    }
-                });
+      .typing-dots span:nth-child(1) { animation-delay: -0.32s; }
+      .typing-dots span:nth-child(2) { animation-delay: -0.16s; }
 
-                function send() {
-                    const input = document.getElementById("input");
-                    const text = input.value.trim();
-                    if (!text) return;
+      @keyframes typing {
+      0%, 80%, 100% { opacity: 0.3; }
+      40% { opacity: 1; }
+      }
 
-                    // Append user message to chat
-                    const chatDiv = document.getElementById("chat");
-                    const userBubble = document.createElement("div");
-                    userBubble.className = "bubble user";
-                    userBubble.textContent = text;
-                    chatDiv.appendChild(userBubble);
-                    chatDiv.scrollTop = chatDiv.scrollHeight;
+      .welcome-message {
+      text-align: center;
+      color: #6a6a6a;
+      margin: 40px 0;
+      }
 
-                    vscode.postMessage({ command: "ask", text });
-                    input.value = "";
-                    input.focus();
-                }
+      .welcome-message h2 {
+      color: #cccccc;
+      margin-bottom: 8px;
+      }
+      /* Hide default arrow for select and use custom ▼ */
+      .model-dropdown {
+      background-image: none;
+      }
+    </style>
+    </head>
+    <body>
+    <div class="chat-container">
 
-                let streamingBubble = null;
+      <div class="chat-messages" id="chatMessages">
+      ${chatHistory || `<div class="welcome-message">
+      <h2>AI Assistant</h2>
+      <p>Start a conversation by typing your message below</p>
+      </div>`}
+      </div>
 
-                window.addEventListener("message", (event) => {
-                    const message = event.data;
-                    if (message.text) {
-                        const chatDiv = document.getElementById("chat");
+      <div class="typing-indicator" id="typingIndicator">
+      <div class="typing-dots">
+      <span></span>
+      <span></span>
+      <span></span>
+      </div>
+      </div>
+      
+      <div class="input-container">
+      <textarea 
+      class="message-input" 
+      id="messageInput" 
+      placeholder="Type your message here..."
+      rows="1"
+      ></textarea>
+      <div class="input-row">
+      <select class="model-dropdown" id="modelDropdown">
+      <option value="gpt-4" selected>GPT-4</option>
+      <option value="gpt-3.5">GPT-3.5</option>
+      <option value="codellama:7b">CodeLlama 7B</option>
+      </select>
+      <div class="input-actions">
+      <button class="icon-button send-button" id="sendButton" title="Send message">
+        ➤
+      </button>
+      </div>
+      </div>
+      </div>
+    </div>
 
-                        if (message.stream) {
-                            if (!streamingBubble) {
-                                streamingBubble = document.createElement("div");
-                                streamingBubble.className = "bubble bot";
-                                chatDiv.appendChild(streamingBubble);
-                            }
-                            streamingBubble.textContent = message.text;
-                        } else {
-                            if (streamingBubble) {
-                                streamingBubble.textContent = message.text;
-                                streamingBubble = null; // Finalize the streaming bubble
-                            }
-                        }
+    <script>
+      const vscode = acquireVsCodeApi();
 
-                        chatDiv.scrollTop = chatDiv.scrollHeight;
-                    }
-                });
+      document.getElementById("sendButton").addEventListener("click", send);
 
-            </script>
-        </body>
-        </html>
-        `;
+      document.getElementById("messageInput").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send();
+      }
+      });
+
+      function send() {
+      const input = document.getElementById("messageInput");
+      const text = input.value.trim();
+      if (!text) return;
+
+      // Append user message to chat
+      const chatDiv = document.getElementById("chatMessages");
+      const userBubble = document.createElement("div");
+      userBubble.className = "message user";
+      userBubble.textContent = text;
+      chatDiv.appendChild(userBubble);
+      chatDiv.scrollTop = chatDiv.scrollHeight;
+
+      vscode.postMessage({ command: "ask", text });
+      input.value = "";
+      input.focus();
+      }
+
+      let streamingBubble = null;
+
+      window.addEventListener("message", (event) => {
+      const message = event.data;
+      if (message.text) {
+      const chatDiv = document.getElementById("chatMessages");
+
+      if (message.stream) {
+      if (!streamingBubble) {
+      streamingBubble = document.createElement("div");
+      streamingBubble.className = "message bot";
+      chatDiv.appendChild(streamingBubble);
+      }
+      streamingBubble.textContent = message.text;
+      } else {
+      if (streamingBubble) {
+      streamingBubble.textContent = message.text;
+      streamingBubble = null; // Finalize the streaming bubble
+      }
+      }
+
+      chatDiv.scrollTop = chatDiv.scrollHeight;
+      }
+      });
+    </script>
+    </body>
+    </html>`;
   }
 
   public resolveWebviewView(
@@ -326,11 +470,19 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
     context: vscode.WebviewViewResolveContext,
     _token: vscode.CancellationToken
   ) {
+    this._webviewView = webviewView;
     webviewView.webview.options = {
       enableScripts: true,
       localResourceRoots: [this._extensionUri],
     };
     webviewView.webview.html = this.getHtml();
+
+    const updateTitle = () => {
+      const activeChat = this.chats.find((c) => c.id === this.activeChatId);
+      webviewView.title = activeChat ? `${activeChat.name}` : "";
+    };
+
+    updateTitle(); // Set initial title
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
       if (message.command === "showChatPicker") {
@@ -354,10 +506,12 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
             });
             this.activeChatId = id;
             this.saveChats();
+            updateTitle(); // Update title dynamically
             webviewView.webview.html = this.getHtml();
           } else {
             this.activeChatId = selected.id;
             this.saveChats();
+            updateTitle(); // Update title dynamically
             webviewView.webview.html = this.getHtml();
           }
         }
@@ -370,6 +524,7 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
         });
         this.activeChatId = id;
         this.saveChats();
+        updateTitle(); // Update title dynamically
         webviewView.webview.html = this.getHtml();
       } else if (message.command === "ask") {
         const chat = this.chats.find((c) => c.id === this.activeChatId);
@@ -394,6 +549,29 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       }
     });
   }
+  private _webviewView?: vscode.WebviewView;
+
+  // Ensure the webview updates correctly when switching chats
+  public updateWebview() {
+    if (this._webviewView) {
+      var activeChat = this.chats.find((c) => c.id === this.activeChatId);
+      // If the active chat is undefined (e.g., after deletion), create a new chat
+      if (!activeChat) {
+        const id = this.generateId();
+        activeChat = { id, name: `Chat ${this.chats.length + 1}`, history: [] };
+        this.chats.push(activeChat);
+        this.activeChatId = id;
+        this.saveChats();
+      }
+      this._webviewView.title = activeChat ? `${activeChat.name}` : "";
+      this._webviewView.webview.html = '';
+      this._webviewView.webview.html = this.getHtml();
+    }
+  }
+}
+
+export function getChatProvider(): ChatSidebarProvider {
+  return chatSidebarProvider;
 }
 
 function streamOllamaWithHistory(
