@@ -1,0 +1,53 @@
+{
+  "name": "helia",
+  "displayName": "Helia",
+  "description": "A minimal VS Code sidebar extension",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.101.0"
+  },
+  "activationEvents": [
+    "*"
+  ],
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "heliaSidebar",
+          "title": "Helia",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "heliaSidebar": [
+        {
+          "id": "heliaChatView",
+          "name": "Chat",
+          "type": "webview",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "heliaChat.startChat",
+        "title": "Start Helia Chat"
+      },
+      {
+        "command": "heliaChat.askQuestion",
+        "title": "Ask Helia a Quick Question"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "node esbuild.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.3"
+  }
+}
