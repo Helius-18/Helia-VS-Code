@@ -30,6 +30,7 @@ export function activate(context: vscode.ExtensionContext) {
             let fullReply = "";
             await streamOllamaWithHistory(
               [{ role: "user", content: input }],
+              "codellama:7b",
               (token, isDone) => {
                 if (token) {
                   fullReply += token;
@@ -176,12 +177,18 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       box-sizing: border-box;
       }
 
+      html, body {
+      height: 100%;
+      }
+
       body {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       color: #cccccc;
       height: 100vh;
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
+      background: transparent;
       }
 
       .chat-container {
@@ -191,6 +198,32 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       max-width: 800px;
       margin: 0 auto;
       width: 100%;
+      height: 100vh;
+      min-height: 0;
+      }
+
+      .chat-messages {
+      flex: 1 1 0%;
+      overflow-y: auto;
+      padding: 20px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-height: 0;
+      scrollbar-width: thin;
+      scrollbar-color: #44444400 #00000000;
+      }
+
+      .chat-messages::-webkit-scrollbar {
+      width: 6px;
+      background: transparent;
+      }
+      .chat-messages::-webkit-scrollbar-thumb {
+      background: #444444;
+      border-radius: 3px;
+      }
+      .chat-messages::-webkit-scrollbar-track {
+      background: transparent;
       }
 
       .input-container {
@@ -201,8 +234,11 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       display: flex;
       flex-direction: column;
       gap: 12px;
-      margin-bottom: 20px;
+      margin-bottom: 0;
       margin-top: 0;
+      position: sticky;
+      bottom: 0;
+      z-index: 2;
       }
 
       .input-row {
@@ -210,6 +246,11 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       align-items: center;
       gap: 12px;
       justify-content: space-between;
+      }
+
+      .model-selector {
+      position: relative;
+      display: inline-block;
       }
 
       .model-dropdown {
@@ -223,6 +264,7 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       appearance: none;
       outline: none;
       max-width: min-content;
+      background-image: none;
       }
 
       .model-dropdown:focus {
@@ -291,15 +333,6 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       background-color: #106ebe;
       }
 
-      .chat-messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 20px 0;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      }
-
       .message {
       padding: 12px 16px;
       border-radius: 8px;
@@ -308,14 +341,16 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       }
 
       .message.user {
-      background-color: #0078d4;
-      color: white;
+      background: linear-gradient(90deg,rgb(32, 42, 56) 0%,rgb(32, 42, 56) 100%);
+      color: #e6e6e6;
       align-self: flex-end;
+      box-shadow: 0 2px 8px 0 #00000033;
       }
 
       .message.bot {
-      background-color: #2d2d30;
-      border: 1px solid #3e3e42;
+      background: none;
+      border: none;
+      color: #cccccc;
       align-self: flex-start;
       }
 
@@ -360,10 +395,6 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       color: #cccccc;
       margin-bottom: 8px;
       }
-      /* Hide default arrow for select and use custom ▼ */
-      .model-dropdown {
-      background-image: none;
-      }
     </style>
     </head>
     <body>
@@ -392,14 +423,13 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       rows="1"
       ></textarea>
       <div class="input-row">
-      <select class="model-dropdown" id="modelDropdown">
-      <option value="gpt-4" selected>GPT-4</option>
-      <option value="gpt-3.5">GPT-3.5</option>
-      <option value="codellama:7b">CodeLlama 7B</option>
+      <div class="model-selector" id="modelSelector">
+      <select id="modelDropdown" style="background:transparent;border:none;color:#cccccc;font-size:12px;outline:none;">
       </select>
+      </div>
       <div class="input-actions">
       <button class="icon-button send-button" id="sendButton" title="Send message">
-        ➤
+      ➤
       </button>
       </div>
       </div>
@@ -413,8 +443,8 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
 
       document.getElementById("messageInput").addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      send();
+        e.preventDefault();
+        send();
       }
       });
 
@@ -441,23 +471,32 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       window.addEventListener("message", (event) => {
       const message = event.data;
       if (message.text) {
-      const chatDiv = document.getElementById("chatMessages");
+        const chatDiv = document.getElementById("chatMessages");
 
-      if (message.stream) {
-      if (!streamingBubble) {
-      streamingBubble = document.createElement("div");
-      streamingBubble.className = "message bot";
-      chatDiv.appendChild(streamingBubble);
-      }
-      streamingBubble.textContent = message.text;
-      } else {
-      if (streamingBubble) {
-      streamingBubble.textContent = message.text;
-      streamingBubble = null; // Finalize the streaming bubble
-      }
-      }
+        if (message.stream) {
+        if (!streamingBubble) {
+          streamingBubble = document.createElement("div");
+          streamingBubble.className = "message bot";
+          chatDiv.appendChild(streamingBubble);
+        }
+        streamingBubble.textContent = message.text;
+        } else {
+        if (streamingBubble) {
+          streamingBubble.textContent = message.text;
+          streamingBubble = null; // Finalize the streaming bubble
+        }
+        }
 
-      chatDiv.scrollTop = chatDiv.scrollHeight;
+        chatDiv.scrollTop = chatDiv.scrollHeight;
+      } else if (message.command === "models") {
+        const modelDropdown = document.getElementById("modelDropdown");
+        modelDropdown.innerHTML = "";
+        message.models.forEach((model) => {
+          const option = document.createElement("option");
+          option.value = model;
+          option.textContent = model;
+          modelDropdown.appendChild(option);
+        });
       }
       });
     </script>
@@ -476,6 +515,11 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [this._extensionUri],
     };
     webviewView.webview.html = this.getHtml();
+
+    // Send models to webview on load
+    fetchOllamaModels().then((models) => {
+      webviewView.webview.postMessage({ command: "models", models });
+    });
 
     const updateTitle = () => {
       const activeChat = this.chats.find((c) => c.id === this.activeChatId);
@@ -531,13 +575,14 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
         if (!chat) {
           return;
         }
+        const selectedModel = message.model || "codellama:7b";
+
         chat.history.push({ role: "user", content: message.text });
         let fullReply = "";
-        await streamOllamaWithHistory(chat.history, (token, isDone) => {
+        await streamOllamaWithHistory(chat.history, selectedModel, (token: string, isDone: boolean) => {
           if (token) {
             fullReply += token;
           }
-          // Ensure updates are sent only to the active chat
           if (this.activeChatId === chat.id) {
             webviewView.webview.postMessage({ text: fullReply, stream: !isDone });
           }
@@ -570,20 +615,52 @@ class ChatSidebarProvider implements vscode.WebviewViewProvider {
   }
 }
 
+// Add a command to fetch Ollama models and send to webview
+async function fetchOllamaModels(): Promise<string[]> {
+  return new Promise((resolve) => {
+    const req = http.request(
+      {
+        hostname: "localhost",
+        port: 11434,
+        path: "/api/tags",
+        method: "GET",
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk) => {
+          data += chunk.toString();
+        });
+        res.on("end", () => {
+          try {
+            const json = JSON.parse(data);
+            const models = (json.models || []).map((m: any) => m.name || m.model);
+            resolve(models);
+          } catch {
+            resolve([]);
+          }
+        });
+      }
+    );
+    req.on("error", () => resolve([]));
+    req.end();
+  });
+}
+
 export function getChatProvider(): ChatSidebarProvider {
   return chatSidebarProvider;
 }
 
+// Fix the `streamOllamaWithHistory` function to accept the model parameter
 function streamOllamaWithHistory(
   history: { role: string; content: string }[],
+  model: string,
   onToken: (token: string, done: boolean) => void
 ) {
-  // Format the conversation as a prompt string
   const prompt =
     history
       .map((h) => (h.role === "user" ? "User: " : "Helia: ") + h.content)
       .join("\n") + "\nHelia:";
-  const data = JSON.stringify({ model: "codellama:7b", prompt, stream: true });
+  const data = JSON.stringify({ model, prompt, stream: true });
   const req = http.request(
     {
       hostname: "localhost",
@@ -597,7 +674,7 @@ function streamOllamaWithHistory(
     },
     (res) => {
       let buffer = "";
-      let finalMessageSent = false; // Track if the final message has been sent
+      let finalMessageSent = false;
       res.on("data", (chunk) => {
         buffer += chunk.toString();
         let lines = buffer.split("\n");
@@ -613,7 +690,7 @@ function streamOllamaWithHistory(
             }
             if (json.done && !finalMessageSent) {
               onToken(json.response || "", true);
-              finalMessageSent = true; // Ensure the final message is sent only once
+              finalMessageSent = true;
               break;
             }
           } catch {}
